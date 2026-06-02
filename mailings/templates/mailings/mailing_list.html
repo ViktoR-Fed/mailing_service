@@ -1,0 +1,43 @@
+{% extends 'mailings/base.html' %}
+
+{% block title %}Список рассылок{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Рассылки</h1>
+    <a href="{% url 'mailings:mailing_create' %}" class="btn btn-primary">+ Создать рассылку</a>
+</div>
+
+<div class="row">
+    {% for mailing in mailings %}
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header {% if mailing.status == 'started' %}bg-success text-white{% elif mailing.status == 'completed' %}bg-secondary text-white{% else %}bg-warning{% endif %}">
+                <div class="d-flex justify-content-between align-items-center">
+                    <strong>{{ mailing.message.subject }}</strong>
+                    <span class="badge bg-light text-dark">{{ mailing.get_status_display }}</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <p><strong>Период:</strong> с {{ mailing.start_datetime|date:"d.m.Y H:i" }} по {{ mailing.end_datetime|date:"d.m.Y H:i" }}</p>
+                <p><strong>Получателей:</strong> {{ mailing.recipients.count }}</p>
+                <p><strong>Попыток отправки:</strong> {{ mailing.attempts.count }}</p>
+                
+                <div class="btn-group w-100">
+                    <a href="{% url 'mailings:mailing_detail' mailing.pk %}" class="btn btn-info btn-sm">Детали</a>
+                    <a href="{% url 'mailings:mailing_update' mailing.pk %}" class="btn btn-warning btn-sm">Изменить</a>
+                    {% if mailing.status == 'started' %}
+                    <a href="{% url 'mailings:send_mailing' mailing.pk %}" class="btn btn-success btn-sm" onclick="return confirm('Отправить рассылку сейчас?')">Отправить</a>
+                    {% endif %}
+                    <a href="{% url 'mailings:mailing_delete' mailing.pk %}" class="btn btn-danger btn-sm" onclick="return confirm('Удалить рассылку?')">Удалить</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12">
+        <div class="alert alert-info">Рассылок пока нет. <a href="{% url 'mailings:mailing_create' %}">Создайте первую рассылку!</a></div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
