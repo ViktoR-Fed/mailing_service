@@ -14,6 +14,19 @@ urlpatterns = [
     path("", views.IndexView.as_view(), name="index"),
     # Аутентификация
     path("register/", views.UserRegistrationView.as_view(), name="register"),
+    path(
+        "register/done/", views.RegistrationDoneView.as_view(), name="registration_done"
+    ),
+    path(
+        "verify/<uidb64>/<token>/",
+        views.EmailVerificationView.as_view(),
+        name="verify_email",
+    ),
+    path(
+        "resend-verification/",
+        views.ResendVerificationView.as_view(),
+        name="resend_verification",
+    ),
     path("login/", views.CustomLoginView.as_view(), name="login"),
     path("logout/", views.CustomLogoutView.as_view(), name="logout"),
     path("profile/", views.ProfileView.as_view(), name="profile"),
@@ -94,7 +107,7 @@ urlpatterns = [
     path("mailings/<int:pk>/send/", views.send_mailing_manual, name="send_mailing"),
     path(
         "mailings/<int:pk>/toggle/",
-        views.toggle_mailing_active,
-        name="toggle_mailing_active",
+        views.toggle_mailing_enabled,
+        name="toggle_mailing_enabled",
     ),
 ]

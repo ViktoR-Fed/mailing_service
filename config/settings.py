@@ -128,10 +128,15 @@ SERVER_EMAIL = EMAIL_HOST_USER
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 CACHE_ENABLED = True
-if CACHE_ENABLED:
-    CASHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": os.getenv("LOCATION"),
-        }
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "mailing-service-cache",
     }
+}
+
+AUTH_USER_MODEL = "mailings.User"
+
+LOGIN_REDIRECT_URL = "mailings:index"
+LOGOUT_REDIRECT_URL = "mailings:index"
+LOGIN_URL = "mailings:login"

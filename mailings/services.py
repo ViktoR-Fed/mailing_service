@@ -1,9 +1,15 @@
+import hashlib
 import logging
+import secrets
 
 from django.conf import settings
+from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.db import transaction
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
 from .models import Mailing, MailingAttempt
 
@@ -24,7 +30,7 @@ def send_mailing(mailing_id):
     # Проверяем, можно ли отправить рассылку
     if not mailing.can_send():
         logger.warning(
-            f"Рассылка #{mailing_id} не может быть отправлена (is_active={mailing.is_active})"
+            f"Рассылка #{mailing_id} не может быть отправлена (is_active={mailing.is_active()})"
         )
         return 0, 0
 
@@ -82,7 +88,7 @@ def send_mailing(mailing_id):
             MailingAttempt.objects.bulk_create(attempts_to_create)
 
     # Обновляем статус рассылки, если время окончания прошло
-    if timezone.now() > mailing.end_time:
+    if timezone.now() > mailing.end_datetime:
         mailing.update_status()
 
     return success_count, total_count
@@ -101,3 +107,45 @@ def update_mailing_statuses():
         logger.info(f"Обновлено статусов рассылок: {updated_count}")
 
     return updated_count
+
+
+def generate_email_verification_token(user):
+    """Генерирует токен для подтверждения email"""
+    return default_token_generator.make_token(user)
+
+
+def send_verification_email(user, request):
+    """Отправляет письмо с ссылкой для подтверждения email"""
+    token = generate_email_verification_token(user)
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+
+    verification_url = request.build_absolute_uri(
+        reverse("mailings:verify_email", kwargs={"uidb64": uid, "token": token})
+    )
+
+    subject = "Подтверждение email - Сервис рассылок"
+    message = f"""
+    Здравствуйте, {user.username}!
+
+    Для завершения регистрации и подтверждения вашего email адреса, пожалуйста, перейдите по ссылке:
+
+    {verification_url}
+
+    Если вы не регистрировались на нашем сервисе, просто проигнорируйте это письмо.
+
+    С уважением,
+    Команда сервиса рассылок
+    """
+
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
+
+
+def verify_email_token(user, token):
+    """Проверяет токен подтверждения email"""
+    return default_token_generator.check_token(user, token)

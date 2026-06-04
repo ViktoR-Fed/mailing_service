@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib.auth.forms import (
+    PasswordResetForm,
     UserChangeForm,
     UserCreationForm,
 )
@@ -40,7 +41,7 @@ class CustomUserCreationForm(UserCreationForm):
 class CustomUserChangeForm(UserChangeForm):
     """Форма изменения профиля пользователя"""
 
-    password = None  # Убираем поле пароля из формы
+    password = None
 
     class Meta:
         model = User
@@ -100,8 +101,8 @@ class MailingForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
-        start_time = cleaned_data.get("start_time")
-        end_time = cleaned_data.get("end_time")
+        start_time = cleaned_data.get("start_datetime")
+        end_time = cleaned_data.get("end_datetime")
 
         if start_time and end_time and start_time >= end_time:
             raise ValidationError("Дата окончания должна быть позже даты начала")
@@ -110,3 +111,27 @@ class MailingForm(forms.ModelForm):
             raise ValidationError("Дата начала не может быть в прошлом")
 
         return cleaned_data
+
+
+class CustomPasswordResetForm(PasswordResetForm):
+    """Кастомная форма восстановления пароля"""
+
+    def send_mail(
+        self,
+        subject_template_name,
+        email_template_name,
+        context,
+        from_email,
+        to_email,
+        html_email_template_name=None,
+    ):
+        """Отправка письма для восстановления пароля"""
+        context["site_name"] = "Сервис рассылок"
+        super().send_mail(
+            subject_template_name,
+            email_template_name,
+            context,
+            from_email,
+            to_email,
+            html_email_template_name,
+        )

@@ -175,6 +175,7 @@ class Mailing(models.Model):
         null=True,
         blank=True,
     )
+    is_enabled = models.BooleanField(default=True, verbose_name="Включена")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
 
@@ -218,7 +219,7 @@ class Mailing(models.Model):
     def can_send(self):
         """Проверяет, можно ли отправить рассылку"""
         now = timezone.now()
-        return self.is_active and self.start_datetime <= now <= self.end_datetime
+        return self.is_enabled and self.start_datetime <= now <= self.end_datetime
 
     def clean(self):
         """Валидация модели"""

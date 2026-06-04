@@ -1,24 +1,23 @@
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
-from django.contrib.auth.decorators import user_passes_test
+from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.contrib.auth.views import (
-    LoginView,
-    LogoutView,
-    PasswordResetView,
-)
+from django.contrib.auth.views import LoginView, LogoutView, PasswordResetView
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from django.views.generic import (
     CreateView,
     DeleteView,
     ListView,
     TemplateView,
     UpdateView,
+    View,
 )
 
 from .forms import (
@@ -29,7 +28,12 @@ from .forms import (
     MessageForm,
 )
 from .models import Client, Mailing, MailingAttempt, Message, User
-from .services import send_mailing, update_mailing_statuses
+from .services import (
+    send_mailing,
+    send_verification_email,
+    update_mailing_statuses,
+    verify_email_token,
+)
 
 
 def is_manager(user):
@@ -48,29 +52,99 @@ class UserRegistrationView(CreateView):
 
     form_class = CustomUserCreationForm
     template_name = "registration/register.html"
-    success_url = reverse_lazy("mailings:index")
+    success_url = reverse_lazy("mailings:registration_done")
 
     def form_valid(self, form):
         response = super().form_valid(form)
         user = form.save()
 
-        # Отправка приветственного письма
-        send_mail(
-            subject="Добро пожаловать в сервис рассылок",
-            message=f"Здравствуйте, {user.username}!\n\nВы успешно зарегистрировались в сервисе управления рассылками.",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=True,
-        )
+        # Отправка письма с подтверждением
+        try:
+            send_verification_email(user, self.request)
+            messages.success(
+                self.request,
+                "Регистрация прошла успешно! На указанный email отправлена ссылка для подтверждения.",
+            )
+        except Exception as e:
+            messages.warning(
+                self.request,
+                "Регистрация прошла, но не удалось отправить письмо с подтверждением. "
+                "Пожалуйста, свяжитесь с администратором.",
+            )
 
-        # Автоматический вход после регистрации
-        login(self.request, user)
-        messages.success(self.request, "Регистрация прошла успешно!")
         return response
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["title"] = "Регистрация"
+        return context
+
+
+class RegistrationDoneView(TemplateView):
+    """Страница после успешной регистрации"""
+
+    template_name = "registration/registration_done.html"
+
+
+class EmailVerificationView(View):
+    """Подтверждение email по ссылке"""
+
+    def get(self, request, uidb64, token):
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            user = None
+
+        if user and verify_email_token(user, token):
+            user.email_verified = True
+            user.email_verification_token = ""
+            user.save()
+
+            # Автоматически входим в систему
+            login(request, user)
+
+            messages.success(
+                request,
+                "Ваш email успешно подтверждён! Теперь вы можете пользоваться сервисом.",
+            )
+            return redirect("mailings:index")
+        else:
+            messages.error(
+                request, "Ссылка подтверждения недействительна или устарела."
+            )
+            return redirect("mailings:login")
+
+
+class CustomLoginView(LoginView):
+    """Кастомная страница входа с проверкой подтверждения email"""
+
+    template_name = "registration/login.html"
+
+    def form_valid(self, form):
+        user = form.get_user()
+
+        # Проверка, подтверждён ли email
+        if not user.email_verified:
+            messages.error(
+                self.request,
+                "Пожалуйста, подтвердите ваш email перед входом в систему. "
+                "Проверьте вашу почту.",
+            )
+            return redirect("mailings:login")
+
+        # Проверка, не заблокирован ли пользователь
+        if user.is_blocked:
+            messages.error(
+                self.request, "Ваш аккаунт заблокирован. Обратитесь к администратору."
+            )
+            return redirect("mailings:login")
+
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["title"] = "Вход в систему"
         return context
 
 
@@ -90,15 +164,24 @@ class ProfileView(LoginRequiredMixin, UpdateView):
         return super().form_valid(form)
 
 
-class CustomLoginView(LoginView):
-    """Кастомная страница входа"""
+class ResendVerificationView(View):
+    """Повторная отправка письма с подтверждением"""
 
-    template_name = "registration/login.html"
+    def post(self, request):
+        email = request.POST.get("email")
+        try:
+            user = User.objects.get(email=email, email_verified=False)
+            send_verification_email(user, request)
+            messages.success(
+                request,
+                "Письмо с подтверждением отправлено повторно. Проверьте вашу почту.",
+            )
+        except User.DoesNotExist:
+            messages.warning(
+                request, "Пользователь с таким email не найден или уже подтверждён."
+            )
 
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context["title"] = "Вход в систему"
-        return context
+        return redirect("mailings:login")
 
 
 class CustomLogoutView(LogoutView):
@@ -116,60 +199,54 @@ class CustomPasswordResetView(PasswordResetView):
     success_url = reverse_lazy("mailings:password_reset_done")
 
 
-class IndexView(TemplateView):
+class IndexView(LoginRequiredMixin, TemplateView):
+    """Главная страница - только для авторизованных пользователей"""
+
     template_name = "mailings/index.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        # Кеширование статистики на 5 минут
-        cache_key = "main_statistics"
-        statistics = cache.get(cache_key)
+        # Пользователь точно авторизован благодаря LoginRequiredMixin
+        user = self.request.user
 
-        if statistics is None:
-            update_mailing_statuses()
+        update_mailing_statuses()
 
-            if is_manager(self.request.user):
-                # Менеджер видит все рассылки
-                statistics = {
-                    "total_mailings": Mailing.objects.count(),
-                    "active_mailings": Mailing.objects.filter(
-                        start_time__lte=timezone.now(),
-                        end_time__gte=timezone.now(),
-                        is_active=True,
-                    ).count(),
-                    "unique_clients": Client.objects.count(),
-                    "completed_mailings": Mailing.objects.filter(
-                        status=Mailing.STATUS_COMPLETED
-                    ).count(),
-                    "created_mailings": Mailing.objects.filter(
-                        status=Mailing.STATUS_CREATED
-                    ).count(),
-                }
-            else:
-                # Обычный пользователь видит только свои рассылки
-                statistics = {
-                    "total_mailings": Mailing.objects.filter(
-                        owner=self.request.user
-                    ).count(),
-                    "active_mailings": Mailing.objects.filter(
-                        owner=self.request.user,
-                        start_time__lte=timezone.now(),
-                        end_time__gte=timezone.now(),
-                        is_active=True,
-                    ).count(),
-                    "unique_clients": Client.objects.filter(
-                        owner=self.request.user
-                    ).count(),
-                    "completed_mailings": Mailing.objects.filter(
-                        owner=self.request.user, status=Mailing.STATUS_COMPLETED
-                    ).count(),
-                    "created_mailings": Mailing.objects.filter(
-                        owner=self.request.user, status=Mailing.STATUS_CREATED
-                    ).count(),
-                }
-
-            cache.set(cache_key, statistics, 300)  # Кеш на 5 минут
+        if is_manager(user):
+            # Менеджер видит все рассылки
+            statistics = {
+                "total_mailings": Mailing.objects.count(),
+                "active_mailings": Mailing.objects.filter(
+                    start_time__lte=timezone.now(),
+                    end_time__gte=timezone.now(),
+                    is_enabled=True,
+                ).count(),
+                "unique_clients": Client.objects.count(),
+                "completed_mailings": Mailing.objects.filter(
+                    status=Mailing.STATUS_COMPLETED
+                ).count(),
+                "created_mailings": Mailing.objects.filter(
+                    status=Mailing.STATUS_CREATED
+                ).count(),
+            }
+        else:
+            # Обычный пользователь видит только свои рассылки
+            statistics = {
+                "total_mailings": Mailing.objects.filter(owner=user).count(),
+                "active_mailings": Mailing.objects.filter(
+                    owner=user,
+                    start_time__lte=timezone.now(),
+                    end_time__gte=timezone.now(),
+                    is_enabled=True,
+                ).count(),
+                "unique_clients": Client.objects.filter(owner=user).count(),
+                "completed_mailings": Mailing.objects.filter(
+                    owner=user, status=Mailing.STATUS_COMPLETED
+                ).count(),
+                "created_mailings": Mailing.objects.filter(
+                    owner=user, status=Mailing.STATUS_CREATED
+                ).count(),
+            }
 
         context.update(statistics)
         return context
@@ -349,6 +426,7 @@ class MailingDeleteView(LoginRequiredMixin, OwnerRequiredMixin, DeleteView):
         return super().delete(request, *args, **kwargs)
 
 
+@login_required
 def mailing_detail(request, pk):
     """Детальный просмотр рассылки со статистикой"""
     mailing = get_object_or_404(Mailing, id=pk)
@@ -394,34 +472,39 @@ def user_list_view(request):
     return render(request, "mailings/user_list.html", context)
 
 
+@login_required
 @user_passes_test(is_manager)
 def toggle_user_active(request, user_id):
     """Блокировка/разблокировка пользователя (только для менеджеров)"""
     user = get_object_or_404(User, id=user_id)
-    user.is_active = not user.is_active
-    user.save()
+    # Используем методы block() и unblock()
+    if user.is_blocked:
+        user.unblock()
+        status = "разблокирован"
+    else:
+        user.block()
+        status = "заблокирован"
 
-    status = "разблокирован" if user.is_active else "заблокирован"
     messages.success(request, f"Пользователь {user.username} {status}")
-
     return redirect("mailings:user_list")
 
 
+@login_required
 @user_passes_test(can_disable_mailings)
-def toggle_mailing_active(request, pk):
+def toggle_mailing_enabled(request, pk):
     """Отключение/включение рассылки (только для менеджеров)"""
     mailing = get_object_or_404(Mailing, id=pk)
-    mailing.is_active = not mailing.is_active
+    mailing.is_enabled = not mailing.is_enabled
     mailing.save()
 
-    status = "активна" if mailing.is_active else "отключена"
+    status = "включена" if mailing.is_enabled else "отключена"
     messages.success(request, f'Рассылка "{mailing.message.subject}" {status}')
 
     cache.delete("main_statistics")
-
     return redirect("mailings:mailing_detail", pk=pk)
 
 
+@login_required
 def send_mailing_manual(request, pk):
     """Ручная отправка рассылки"""
     mailing = get_object_or_404(Mailing, id=pk)
@@ -458,6 +541,7 @@ def send_mailing_manual(request, pk):
     return redirect("mailings:mailing_detail", pk=pk)
 
 
+@login_required
 def user_statistics(request):
     """Статистика по рассылкам текущего пользователя"""
     if is_manager(request.user):
