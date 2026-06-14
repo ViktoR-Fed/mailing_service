@@ -1,0 +1,28 @@
+{% extends 'mailings/base.html' %}
+
+{% block title %}Регистрация завершена{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="text-center">Регистрация завершена</h3>
+            </div>
+            <div class="card-body text-center">
+                <div class="alert alert-success">
+                    <h4>Проверьте вашу почту!</h4>
+                    <p>На указанный email отправлена ссылка для подтверждения регистрации.</p>
+                    <p>Пожалуйста, перейдите по ссылке, чтобы активировать аккаунт.</p>
+                </div>
+                
+                <form method="post" action="{% url 'mailings:resend_verification' %}" class="mt-3">
+                    {% csrf_token %}
+                    <input type="hidden" name="email" value="{{ request.session.registration_email }}">
+                    <button type="submit" class="btn btn-link">Отправить письмо повторно</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
