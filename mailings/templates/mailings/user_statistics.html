@@ -1,0 +1,100 @@
+{% extends 'mailings/base.html' %}
+
+{% block title %}Моя статистика{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Статистика моих рассылок</h1>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <h5 class="card-title">Всего рассылок</h5>
+                <h2 class="display-4">{{ total_mailings }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <h5 class="card-title">Всего попыток</h5>
+                <h2 class="display-4">{{ total_attempts }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <h5 class="card-title">Успешных</h5>
+                <h2 class="display-4">{{ success_attempts }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-danger">
+            <div class="card-body">
+                <h5 class="card-title">Неудачных</h5>
+                <h2 class="display-4">{{ failed_attempts }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>Общая эффективность</h5>
+            </div>
+            <div class="card-body">
+                <div class="progress" style="height: 30px;">
+                    <div class="progress-bar bg-success" role="progressbar" 
+                         style="width: {{ success_rate }}%" 
+                         aria-valuenow="{{ success_rate }}" 
+                         aria-valuemin="0" 
+                         aria-valuemax="100">
+                        {{ success_rate|floatformat:1 }}%
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h3 class="mb-3">Детальная статистика по рассылкам</h3>
+<div class="row">
+    {% for stat in mailing_stats %}
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <strong>{{ stat.mailing.message.subject }}</strong>
+                <span class="badge bg-secondary float-end">{{ stat.mailing.get_status_display }}</span>
+            </div>
+            <div class="card-body">
+                <p><strong>Период:</strong> {{ stat.mailing.start_time|date:"d.m.Y H:i" }} - {{ stat.mailing.end_time|date:"d.m.Y H:i" }}</p>
+                <p><strong>Получателей:</strong> {{ stat.mailing.recipients.count }}</p>
+                <div class="row text-center">
+                    <div class="col-4">
+                        <h5 class="text-primary">{{ stat.total_attempts }}</h5>
+                        <small>Всего попыток</small>
+                    </div>
+                    <div class="col-4">
+                        <h5 class="text-success">{{ stat.success }}</h5>
+                        <small>Успешно</small>
+                    </div>
+                    <div class="col-4">
+                        <h5 class="text-danger">{{ stat.failed }}</h5>
+                        <small>Неудачно</small>
+                    </div>
+                </div>
+                <a href="{% url 'mailings:mailing_detail' stat.mailing.pk %}" class="btn btn-sm btn-info mt-2 w-100">Подробнее</a>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12">
+        <div class="alert alert-info">У вас пока нет рассылок</div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
